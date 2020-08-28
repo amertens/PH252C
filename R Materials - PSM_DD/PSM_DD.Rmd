@@ -1,0 +1,273 @@
+---
+title: "PSM and DD"
+author: "Zachary Butzin-Dozier"
+date: "7/10/2019"
+output:
+  html_document:
+    df_print: paged
+---
+
+#Propensity Score Matching (PSM) and Difference-in-Difference (DD)
+
+Note: This assignment includes text and code adapted from Dr. Jen Ahern's course "Methods in Social Epidemiology" as well as Dr. Paul Gertler's course "Applied Impact Evaluation"
+
+*Warning: Fictional Scenario*
+
+Uh oh – you just learned that local government officials did not appropriately randomize clusters to receive different arms of the intervention. Government officials assigned villages that voted for them to receive the treatment arms, and assigned villages that voted against them to receive no treatment (or less expensive treatments. 
+
+This violates the principle of exchangeability, as we cannot assume that all of the groups are comparable in factors other than treatment. For example – all of the treatment groups (who voted for the party in power) may be high income, while all of the control groups may be low income. Differences between the groups may be due to income level, rather than the intervention.
+
+How can we salvage these data to draw meaningful conclusions?
+
+###1.	Propensity score matching 
+
+We can match villages that received treatment to villages that did not receive treatment, but had a similar likelihood of receiving treatment based on an index of observable characteristics
+
+
+Steps of propensity score matching (from Applied Impact Evaluation – Human Development Network)
+1.	Representative and highly comparable survey of non-participants and participants
+2.	Pool the two samples and estimate a logit (or probit) model of participation
+3.	Restrict samples to assure common support (important source of bias in observational studies)
+4.	For each participant (or cluster), find a sample of non-participants with similar propensity scores
+5.	Compare the outcome indicators. The difference is the estimate of the gain due to the program for that observation
+6.	Calculate the mean of these individual gains to obtain the average overall gain
+
+```{r}
+#Install packages
+#install.packages("MatchIt")
+
+#load packages and data
+library(MatchIt)
+library(tidyverse)
+library(here)
+diar <- read.csv(here("washb-bangladesh-diar-public.csv"))
+enrol <- read.csv(here("washb-bangladesh-enrol-public.csv"))
+tr <- read.csv(here("washb-bangladesh-tr-public.csv"))
+```
+
+```{r}
+#MERGE treatment, outcome, and enrollment data frames
+df <- merge(diar, tr, by=c("block","clusterid"), all.x=T, all.y=T)
+df2 <- merge(df, enrol, by="dataid", all.x=T, all.y=T)
+```
+Prior data have indicated that mother's education, father's education, food security category, and community wealth level are highly correlated with a treatment assignment.
+```{r}
+#Select variables of interest 
+df3 <- df2 %>%
+  select(tr, diar7d, momedu, dadeduy, hfiacat, latown, svy) 
+  
+#Remove missing data. Note: this assumes that data are missing at random, meaning that there is no systematic difference between those with missing data and those without missing data.
+df3 <- df3[complete.cases(df3),]
+```
+
+```{r}
+#Filter data to only include control and WASH groups
+cntrl = filter(df3, tr=="Control")
+wsh = filter(df3,tr=="WSH")
+
+#Create new variable where WASH = 1 and control = 0. The matchit function requires a dichotomous outcome.
+cntrl = mutate(cntrl, treat = 0)
+wsh = mutate(wsh, treat = 1)
+
+#rebind control and WASH groups to create new dataframe
+df4 <- rbind(cntrl, wsh)
+head(df4)
+tail(df4)
+```
+
+```{r}
+#Set seed for reproducability
+set.seed(2)
+
+#Estimate propensity score
+###This is a linear model of (treatment~predictors), 
+
+pfit <- glm(treat ~ factor(momedu) + factor(dadeduy) + factor(hfiacat) + factor(latown), family="binomial", data = df4)
+df4$ps1 <- predict(pfit, type = "response")
+```
+
+*Question 1* 
+What do you think is a weakness of generating propensities to treatment based on only these criteria?
+
+```{r}
+#Distribution of PS
+#maybe start at end of page 3 instead
+p1 <- data.frame(df4$ps1[df4$tr=="WSH"])
+colnames(p1) <- "ps1"
+p1$type <- 1
+p0 <- data.frame(df4$ps1[df4$tr=="Control"])
+colnames(p0) <- "ps1"
+p0$type <- 0
+```
+
+
+```{r}
+#Plot propensity score to see common support
+plot_df4 <- data.frame(rbind(p1, p0))
+ggplot(data=plot_df4) + geom_histogram(aes(ps1), bins=30, stat = "bin") +
+facet_wrap(~type) + coord_flip() + theme_bw()
+
+```
+
+*Question 2*
+Do you see much common support (overlap in propensity scores)?
+Did you expect this? Why or why not?
+
+
+```{r}
+#Set seed to ensure reproducability in matching
+
+set.seed(2)
+
+#Use matchit function to match based on propensity scores
+
+mfit <- matchit(treat ~ factor(momedu) + factor(dadeduy) + factor(hfiacat) + factor(latown), data = df4, method = "nearest", discard="both", replace=T)
+summary(mfit)
+
+m_df <- match.data(mfit)
+```
+
+```{r}
+# The easiest way to conduct analyses after matching is to take the mean of each group– the package matchit uses weights to represent values that have been selected multiple times, so you need to calculate weighted means of these groups
+
+m_df %>%
+  group_by(treat) %>%
+  dplyr::summarize(Mean = weighted.mean(diar7d, weights, na.rm=TRUE))
+
+```
+
+##Interpretation
+
+*Question 3* What was the difference between WASH and control groups on diarrhea prevalence after propensity score matching?
+
+*Question 4* Compare to the difference in diarrhea prevalence between control and before propensity score matching (control = 0.05967181 and WSH = 0.04233512, calculated in Intro R exercise). Is this what you expected? Why or why not?
+
+
+
+#Difference in Difference
+
+*A hypothetical within a hypothetical*
+
+After conducting the graph of propensity scores in the treated and untreated groups, you realize that there is very little common support. To conduct PSM, you need to have common support, indicating that a portion of the control group has similar propensities of being treated as those in the treatment group. 
+
+We can still use difference in difference!
+
+With difference in difference, you can compare the treatment group to a control group with different characteristics, as long as the two groups demonstrate *parallel trends*. A parallel trend means that both groups were changing at similar rates prior to the intervention. 
+
+Let's see if this is the case with the WASH treatment and control groups
+
+```{r}
+#Create table of prevalence by treatment groups at baseline and follow up
+prev_table = df4 %>%
+  filter(svy!=1) %>%  #we only want baseline and endline data
+  group_by(tr, svy) %>%
+  summarize(prevalence = mean(diar7d))
+prev_table
+```
+
+```{r}
+#hypothetical prevalence 1 year before baseline (to check for parallel trends)
+#control = .0665
+#WSH = .0579
+#At baseline, control prevalence = .0765 and wash prevalence = .0679 
+
+
+plotdf = data.frame(
+  mean = c(.0665, .0765, .0579,  .0679),
+  time = rep(c("1yr before", "baseline"), 2),
+  tr = c("control","control", "wash", "wash")
+)
+
+
+#make "time" a factor with "before" as the first level so that the plot order is correct
+plotdf$time = factor(plotdf$time, levels=c("1yr before","baseline"))
+
+#Create the plot
+ggplot(plotdf, aes(x=time, y=mean, group=tr, color=tr)) +
+  geom_point(size=2) +
+  geom_line() + theme_classic()
+
+
+```
+These parallel trends show that the two groups' diarrhea prevalances were changing at a similar rate prior to the intervention.
+
+```{r}
+#First, let's create a table of prevalence by treatment groups at baseline and follow up
+prev_table = df4 %>%
+  filter(svy!=1) %>%  #we only want baseline and endline data
+  group_by(tr, svy) %>%
+  summarize(prevalence = mean(diar7d))
+prev_table
+```
+
+```{r}
+#Now that we have established parallel trends, we can use the results from the table to plot the results of the difference-in-difference analysis
+
+plotdf = data.frame(
+  mean = c(.0765, .0598, .0679, .0503),
+  time = rep(c("before", "after"), 2),
+  tr = c("control","control", "wash", "wash")
+)
+
+#make "time" a factor with "before" as the first level so that the plot order is correct
+plotdf$time = factor(plotdf$time, levels=c("before","after"))
+
+#Create the plot
+ggplot(plotdf, aes(x=time, y=mean, group=tr, color=tr)) +
+  geom_point(size=2) +
+  geom_line() + theme_classic()
+
+
+
+```
+
+
+*Question 5*
+
+Conceptually, why does difference in difference analysis require parallel trends prior to baseline?
+
+
+##Math of difference in difference
+
+Just subtract twice!
+
+A = baseline prevalence group 1
+B = endline prevalence group 1
+C = baseline prevalence group 2
+D = endline prevalence group 2
+
+$$impact = (A-B)-(C-D)$$
+This is one of the most mathematically simple methods that we will cover
+
+```{r}
+#Refer to prevalance table above for baseline and endline values
+control.baseline = 0.07652399
+control.endline = 0.05980861	
+wash.baseline = 0.06791569	
+wash.endline = 0.05039096
+diff.in.diff = (control.baseline - control.endline) - (wash.baseline - wash.endline)
+diff.in.diff
+```
+
+*Question 6*
+Using the table below and the procedure above, which uses svy=1 as endline, conduct a difference-in-difference analysis comparing WASH to the control group and report the treatment effect as "diff.in.diff2".
+
+```{r}
+prev_table2 = df4 %>%
+  filter(svy!=2) %>%  #this time, we are using svy=1 as our endline data
+  group_by(tr, svy) %>%
+  summarize(prevalence = mean(diar7d))
+prev_table2
+```
+
+```{r}
+control.baseline2 = #insert value here
+control.endline2 = #insert value here
+wash.baseline2 = #insert value here
+wash.endline2 = #insert value here
+  
+diff.in.diff2 = #insert formula here
+  
+diff.in.diff2
+```
+

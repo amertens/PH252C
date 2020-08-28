@@ -1,0 +1,200 @@
+---
+title: "Introduction_to_R_252C"
+author: "Zach Butzin-Dozier"
+date: "7/30/2019"
+output:
+  html_document:
+    df_print: paged
+---
+Adapted from materials originally created by Dr. Jade Benjamin-Chung
+Benjamin-Chung, Jade. (2019) Introduction to R for Epidemiologists. https://ucb-epi-r.github.io.
+
+# R Markdown
+For this exercise, we will be using R Markdown, rather than R Script. In R Markdown files, executable code is in chunks between "```{r}" and "```". In R script files, the entire file is executable code. In a code chunk, a "#" is placed at the start of a line so that R knows that this is a comment (in blue), rather than executable code. When you are finished with your code, you can "knit to pdf" to create a pdf file of your markdown file and its output.
+
+# Installing and Running Packages
+```{r}
+#Install tidyverse package and here package (you only need to do this once!)
+#install.packages("tidyverse")
+#install.packages("here")
+
+#Load the tidyverse and here package (you need to do this each time you start an R session)
+library(tidyverse)
+library(here)
+```
+
+# Downloading, merging, and subsetting the WASH Benefits data
+
+First, make sure that you have downloaded this week's "R Materials" (washb-bangladesh-diar-public.csv, washb-bangladesh-tr-public.csv, and this RMD file) and have stored them in the same folder.
+
+Note: do not be alarmed if the code below is overwhelming. We have merged and subsetted the data for you, but we want to make the code available for you to reference in the future.
+
+Data analysis exercises in this course use data from the WASH Benefits Bangladesh trial. The trial assessed whether water, sanitation, handwashing, and nutrition interventions delivered separately or together could reduce child diarrhea and/or improve child growth. The trials used a cluster- and block-randomized design. Within each geographic block, 8 village clusters were randomized to a treatment or control arm. See Luby et al. 2018 for full details (doi: http://dx.doi.org/10.1016/)
+
+In this first exercise we will calculate the prevalence of diarrhea in different treatment arms after the interventions were delivered. 
+
+The data and codebooks are publicly available here: https://osf.io/pqzj5/
+
+```{r}
+# Load the diarrhea dataset:
+d = read.csv(here("washb-bangladesh-diar-public.csv"))
+
+# Load the dataset with treatment data
+tr = read.csv(here("washb-bangladesh-tr-public.csv"))
+```
+
+Next let's merge the two datasets together. This will allow us to calculate the prevalence of diarrhea in different treatment arms (e.g., water, sanitation, handwashing, etc.)
+```{r}
+d_tr = left_join(d, tr, by=c("block","clusterid"))
+```
+
+Now let's filter to only keep the rows for diarrhea measurements after the interventions were delivered.The svy variable includes values 0, 1, 2. We are going to drop the 0 values, which indicate the time period before interventions were delivered. 
+```{r}
+#Note: in R, "!" means "not". In English, the code below means "Filter d_tr to include values where svy is not equal to 0"
+#The %>% is the pipe command, which we use to perform multiple operations on a datset
+d_tr = d_tr %>% filter(svy!=0)
+```
+
+Now we are going to drop children with missing values in the diarrhea variable from the dataset. This assumes that they were missing completely at random - i.e., that there are no characteristics associated with whether a child was missing diarrhea measurement. 
+```{r}
+#Note: we are using "diar7d" (7 day recall of diarrhea cases) as our outcome of interest
+d_tr = d_tr %>% filter(!is.na(diar7d))
+# Take a look at the first 6 rows of the merged dataset with the command "head":
+head(d_tr)
+```
+
+# Questions
+
+To count the number of people with the disease, the code below uses the pipe operator %>% to perform an operation on the dataframe df. The pipe operator allows us to run a series of actions on our data.frame df. The pipe separates each action, and these actions are established using functions (filter and summarise below) that are like verbs in a sentence.
+
+First, we filter the dataframe to only include rows where diar7d==1. Then the next pipe indicates that the summarise command is performed on the filtered dataset. In this filtered dataset, we count the number of rows using the summarise(n_with_diarrhea=n()) command. Summarise can be used for a variety of calculations, such as the mean. n() is used with summarise to count rows. Below we label the result n_with_disease. We then include a line with ndiar on its own, which tells R to display the contents of this object.
+
+In general, it is a good practice to keep your code tidy and organized. This makes it easier to read and understand and also easier to catch mistakes. One way to keep your code tidy is to use a line break after each pipe. Click the check button to run the code.
+
+**Problem 1:**
+
+```{r}
+#Calculate the number of children with diarrhea across all children in the dataset (ie., not stratifing by the treatment variable). Use the variable diar7d for diarrhea.
+ndiar = d_tr %>%
+  filter(diar7d==1) %>%
+  summarise(n_with_diarrhea=n())
+ndiar
+```
+
+Calculate the number of children without diarrhea across all children in the dataset (ie., not stratifing by the treatment variable). Use the variable diar7d for diarrhea. Save your result in an object called p1.  Label the result inside p1 as n_without_diarrhea
+```{r}
+p1 = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+```
+
+**Problem 2:**
+
+```{r}
+#We can use R to calculate prevalence in a dataframe. Below, we will calculate the prevalence of bruising in our dataset
+#Note: we need to filter to remove NA values for bruising, but we have already removed missing values for diarrhea
+pbruise = d_tr %>%
+  filter(!is.na(bruise7d)) %>%
+  summarise(mean(bruise7d))
+pbruise
+```
+Calculate diarrhea prevalence in the whole dataset (ignoring treatment arm) and save it in an object called prevalence. Note: we have already filtered to remove missing values for diarrhea.
+```{r}
+# Problem 2: Calculate diarrhea prevalence in the whole dataset (ignoring treatment arm) and save it in an object called prevalence.
+prevalence = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+```
+
+**Problem 3:**
+
+We can use R to create tables based on counts in our data. In epidemiology, we often create 2X2 tables based on binary exposure and binary outcome. Below, we have written code with 3 columns. The first column describes treatment, the second column The second column is called "bruise7d" and includes 0 for children without bruising and 1 for children with bruising. The third column is called "n" and includes the number of children with or without bruising in that arm. 
+```{r}
+bruise_tr_table = d_tr %>%
+  group_by(tr, bruise7d) %>%
+  summarise(n=n())
+bruise_tr_table
+```
+
+Now let's get counts of whether children did or did not have diarrhea in each treatment arm. Since the WASH Benefits trial, there were 7 different arms (6 intervention + control) create a data frame with 14 rows (two for each arm). The first column is called "tr" for treatment. The second column is called "diar7d" and includes 0 for children without diarrhea and 1 for children with diarrhea. The third column is called "n" and includes the number of children with or without diarrhea in that arm.
+```{r}
+# Hint: the row for Control with no diarrhea should be this: 
+# tr              diar7d     n
+# Control              0  3782
+#-----------------------------------------------
+diar_tr_table = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+diar_tr_table
+
+```
+
+
+**Problem 4:** 
+Calculate the diarrhea prevalence in each treatment arm. You will need to combine different commands (group_by, summarise, and mean) used in this problem set to calculate this. Save the results in an object called prevalence_tr. It should have 7 rows (one for each treatment) and two columns. The first column should be for the treatment name and the second should be for the prevalence. 
+```{r}
+prevalence_tr = "<<<<<<<<<g<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+prevalence_tr
+```
+
+```{r}
+#Now, we can use the results from the table above to visualize the data with ggplot2
+#plotdiar = ggplot(prevalence_tr)+
+  #geom_col(mapping = aes(x = tr, y = (prevalence))) + ylab("Prevalence of Diarrhea") +xlab("Treatment Group")
+#plotdiar
+```
+**Problem 5:** 
+Examine the results in the plot above. Which arm had the lowest diarrhea prevalence? Save the name of the treatment arm using the same spelling as in the treatment label in prevalence_tr to indicate your answer in an object called p5. (e.g., p5 = "Control")
+```{r}
+p5 = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+
+```
+
+**Problem 6:** Which treatment arm had prevalence closest to the prevalence in the control arm? Save the name of the treatment arm using the same spelling as in the treatment label in prevalence_tr to indicate your answer in an object called p6. (e.g., p6 = "Control")
+```{r}
+p6 = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+
+```
+
+# cbind and rbind
+
+We can use the commands cbind and rbind to merge columns with the same number of rows or columns, respectively. 
+
+```{r}
+#Lets explore how we can merge dataframes using cbind and rbind
+x = c(1,2,3)
+y = c(4,5,6)
+z = c(7,8,9)
+```
+
+```{r}
+#first, let's try cbind
+cxyz = cbind(x,y,z)
+cxyz
+```
+
+```{r}
+#now, let's try again with rbind
+rxyz = rbind(x,y,z)
+rxyz
+```
+
+Below are the scores for 3 highschool cross-country runners in their last 4 mile runs. 
+```{r}
+ryan = c(6,7,7,8)
+sarah = c(6,6,7,8)
+phil = c(7,8,9,9)
+
+runtimes = rbind(ryan, sarah, phil)
+runtimes
+```
+
+**Problem 7:** A transfer student, Tyler, just joined the team. Tyler's last 4 run times are listed below. How would you merge Tyler's scores with the rest of the team?
+```{r}
+tyler = c(6,6,6,8)
+runtimes2 = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+```
+**Problem 8:** The students all run their next race. Their race times are listed below (ryan first, sarah second, phil third, and tyler fourth). How would you merge these scores with the dataframe runtimes2?
+```{r}
+race5 = c(6,7,5,5)
+runtimes3 = "<<<<<<<<<<<<< YOUR CODE HERE >>>>>>>>>>>>>>>"
+```
+
+# Knit to PDF
+Now that you have completed the 8 problems above, click the "knit" icon at the top of your screen and select "knit to pdf". This will create a pdf from this file. Next, upload this pdf to Gradescope for the assignment "Intro R Coding Assignment". 
+
+**Great job completing your first data analysis exercise!**

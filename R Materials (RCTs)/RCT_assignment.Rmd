@@ -1,0 +1,272 @@
+---
+title: "Analyzing RCT Data"
+author: "Lakshmi Gopalakrishnan"
+output:
+  pdf_document: default
+  pdf: default
+---
+Purpose: To analyze a dataset of a cluster randomized controlled trial  
+
+Learning objectives 
+1. Merging, manipuating data using base R and the tidyverse package
+2. Creating simple functions and learning to use 'apply()' family of functions
+3. Getting the baseline characteristics for the treatment and control groups 
+4. Cleaning and preparing data for running t-test 
+5. Conducting an intent-to-treat analysis to estimate the impact of the program on the outcome
+6. Interpreting the results (impact,CI,SE,summarizing the OLS and ttest)
+
+For this exercise, we will use the WASH-Benefits Bangladesh study by Luby et al.(2018) https://www.thelancet.com/journals/langlo/article/PIIS2214-109X(17)30490-4/fulltext. You have one week to complete this exercise. 
+
+This R exercise is organized as following: 
+Sections (Numbered numerically) are divided to give you an idea of how to organize an R workflow.
+Questions (Numbered alphabetically) are designed to give you practice on R as well as make you think about how to interpret the results. 
+
+In this exercise, you will estimate the impact of WSH+Nutrition Group on target child's Length for Age Z-score (LAZ) at 2-year follow-up. As a reminder, LAZ is a measure of children's linear growth. Z-scores range from -3 to 3. A LAZ <= -2 indicates a child is stunted (their linear growth is lower than the standard age for a given sex). 
+
+
+The code in this file has been adapted and simplified from Dr. Ben Arnold's WASH Benefits analysis <https://github.com/ben-arnold/WBB-primary-outcomes>. 
+
+Before starting, please download relevant datasets.  
+
+## R Markdown
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+Part 0. INSTALL PACKAGES AND RUN LIBRARIES 
+First, install relevant packages. We have already installed tidyverse and here in previous assignments, in this assignment we will install clusterSE package, which we will use for clustering Standard Errors later. 
+```{r installpackages}
+#install.packages("clusterSEs")
+#No need to install any packages for ttest as it is available in Base R 
+```
+
+Load relevant packages into your current work environment. 
+```{r load_pkg}
+library(here)
+library(tidyverse)
+library(clusterSEs)
+```
+
+
+Next, load the datasets. We need three data files for this assignment - enrol, treatment (tr), and anthro dataset.
+Enrol has enrolment characteristics, Tr has treatment arms, and anthro has LAZ and other anthropometric measures.
+```{r load}
+#load the enrolment dataset as it has baseline characteristics 
+enrol = read.csv(here("washb-bangladesh-enrol-public.csv"))
+#load the trial dataset
+tr = read.csv(here("washb-bangladesh-tr-public.csv"))
+#load the outcome dataset (LAZ/anthro)
+anthro = read.csv(here("washb-bangladesh-anthro-public.csv"))
+```
+
+Part 1: MERGING THE DATASETS 
+```{r merge}
+#Let's merge the enrolment dataset with treatment arms dataset using left_join and call it enrol_tr 
+enrol_tr <- left_join(enrol,tr, by=c("block", "clusterid"))
+#Do you notice the dataframe enrol_tr which added exactly one column to the enrol dataframe. 
+
+#Now, let's merge the anthro dataset with treatment arms 
+anthro_tr <- left_join(anthro, tr, by=c("block", "clusterid"))
+```
+
+Part 2. CREATING FUNCTIONS AND USING APPLY() SET OF FUNCTIONS
+For those unfamiliar with programming jargon, functions are way to encode logic in a construct that is created once and than used multiple times. We have already used functions from Base R, as well as packages like dplyr. 
+
+Here we create function len_col that wraps another function length(), applies it to a column x, factored by treatment groups. We are using tapply, which comes from apply family of functions in Base R, apply family of functions allow us to manipulate slices of data from matrices, arrays, lists, and dataframes in a repetitive way. (For those familiar with programming languages like python or Java, this function is R's interpretation of Lambda functions). 
+
+We are creating the functions len_col() and mean_col(). length() is used to count the observations of a R object (List, column, or a matrix). tapply will apply function length to a group of values x, with reach value factored by treatment groups present in enrolment dataset. (think about what will happen if treatment groups are not present in x)
+
+```{r length}
+len_col <- function(x) {
+  tapply(x, enrol_tr$tr, function(x) length(x[!is.na(x)])) 
+}
+```
+
+Question a. Create a function to calculate the mean for each treatment arm for all the variables. 
+Hint: Look at the length function above and use mean(). Remember to remove the missing values.
+
+```{r mean}
+mean_col <- function(x) {
+  " -------- your code here -------- " 
+}
+```
+
+Let's gather the important variables to get characteristics of enrolment dataset
+```{r variableList}
+varlist <- c("momage","momeduy","dadeduy","dadagri","Nhh","landacre","watmin","hfias","latown","hwlatwat","hwlatsoap")
+```
+
+Let's get the mean and length of select variables for enrolment in different treatment arms, here we are using sapply, which will apply the functions we created earlier to every element of the dataframe columns and give the result as a list of list. 
+
+```{r}
+#Applying sapply() to the list of variables in enrol_tr to calculate length and mean.
+enrol_means <- sapply(enrol_tr[varlist], mean_col)
+```
+
+question b. use sapply to calculate length of characteristic variables in enrol_tr 
+```{r }
+enrol_length <- sapply("------- your code here ---------")   
+```
+
+Part 3. GETTING THE BASELINE CHARACTERISTICS FOR THE TREATMENT AND CONTROL GROUPS  
+
+Let's combine the results into a single dataframe, observe how we use combination of dplyr and Base R to get the result as a dataframe. Creating a dataframe like this makes it easier to manipulate data, perform statistical calculations, and present of data. 
+
+```{r}
+#Transposing mean of variables for convenience of printing the table 
+balance.tab.mu <- t(enrol_means) 
+#Transposing length of variables for convenience of printing the table 
+balance.tab.n <- t(enrol_length)
+
+#Assigning names to each column in the order in which they occur in the dataframe 
+tr_groups <- c("Control.Count", "Control.Mean", "Handwashing.Count", "Handwashing.Mean", "Nutrition.Count", "Nutrition.Mean", "Nutrition + WSH.Count", "Nutrition + WSH.Mean", "Sanitation.Count", "Sanitation.Mean", "WSH.Count", "WSH.Mean",  "Water.Count", "Water.Mean")
+
+#Creating a dataframe of enrol_base that contains baseline characteristics of all treatment arms 
+enrol_base <- data.frame(
+   variable=rownames(balance.tab.n),
+    balance.tab.n[,1],
+    balance.tab.mu[,1],
+    balance.tab.n[,2],
+    balance.tab.mu[,2],
+    balance.tab.n[,3],
+    balance.tab.mu[,3],
+    balance.tab.n[,4],
+    balance.tab.mu[,4],
+    balance.tab.n[,5],
+    balance.tab.mu[,5],
+    balance.tab.n[,6],
+    balance.tab.mu[,6],
+    balance.tab.n[,7],
+    balance.tab.mu[,7],
+   stringsAsFactors = F
+)
+names(enrol_base) <- c("variable",tr_groups)
+enrol_base
+```
+
+Just for simplicity, let's subset the control and treatment groups for one of them and observe the baseline 
+```{r ct-tr}
+ct = "Control"
+tr = "Nutrition"
+
+enrol_char_nutrition <- enrol_base %>% select(variable, "Control.Count", "Control.Mean", "Nutrition.Count", "Nutrition.Mean")
+```
+
+QUESTION c. Finish the following code to subset the baseline characteristics of the two groups- WSH+Nutrition and Control groups [Please note the code will be deleted in the problem set]
+
+```{r}
+#Type your code here.. 
+enrol_char_wsh_nutrition <- " --------- your code here ---------- "
+```
+
+QUESTION d. What do you think of the baseline characteristics of the two groups. Write your answer in 1-2 lines. Why are we not including the p-values?
+
+# your answer 
+
+Part 4. CLEANING AND PREPARING DATA FOR RUNNING T-TEST 
+Once we have checked the baseline characteristics for the different treatment arms, we can move on to check the difference in outcome for treatment arms. The next few steps are for preparing the data, analyzing the outcome using T-test, and producing a regression model for the relationship between outcome and treatment groups
+
+Prepare the data for t-test 
+```{r}
+# select the survey year 2 
+anthro_out <- subset(anthro_tr,svy==2)
+# drop the missing values for laz
+anthro_out <- subset(anthro_out, !is.na(anthro_out$laz))
+#subset to only the birth cohort
+anthro_out <- subset(anthro_out,tchild=="Target child")
+```
+
+Question e. Why are we taking LAZ scores for target child and not any child in the household? 
+
+# your answer
+
+Question f. Calculate the mean, SD and length of LAZ for target child. 
+#Fill the remaining code
+```{r}
+
+# calculate mean, and SD for laz for target child in birth cohort, length has been done for your reference
+laz.n <- tapply(anthro_out$laz,anthro_out$tr,function(x) length(x))
+laz.mean <- " ---------- your code here ----------- "
+laz.sd <- " ----------- your code here ----------- "
+
+laz_n <- cbind(laz.n, laz.mean, laz.sd)
+laz_n
+```
+
+Prepare the variables we need for t-test
+```{r}
+# perform the t test with randomization conducted at block-level (stratified by block). Therefore, we have to perform the t-test at the block level for each group and then compare the means. Y is our outcome variable
+
+#We are creating a smaller dataframe for t-test by each strata for our control and nutrition treatment arms   
+ctrl_grp = anthro_out %>% 
+           #Subset to the control arm
+           filter(tr=="Control") %>% 
+           #subset the dataset to the three needed variables, and rename the outcome to Y and the block variable to "strat"
+           select(Y=laz, tr, strat=block)
+#Repeat for the nutrition arm
+nut_grp = anthro_out %>% filter(tr=="Nutrition") %>% select(Y=laz, tr, strat=block)
+  
+  
+
+```
+
+Sample code for running the t-test for Control and Nutrition arms, to see the detailed arguments in t.test function, type ?t.test in console
+```{r}
+# stratification -- calculating mean for each strata/block. Remember, that there are 90 blocks and this calculates mean of LAZ for each block by control and then treatment.
+ctrl_block_mean <- tapply(ctrl_grp$Y, ctrl_grp$strat, function(x) mean(x))
+nut_block_mean <- tapply(nut_grp$Y, nut_grp$strat, function(x) mean(x))
+
+ctrl_block_mean <- ctrl_grp %>% group_by(strat) %>% summarize(mean=mean(Y))
+nut_block_mean <- nut_grp  %>% group_by(strat) %>% summarize(mean=mean(Y))
+ctrl_block_mean
+nut_block_mean
+
+t.est.nutrition <- t.test(nut_block_mean$mean, ctrl_block_mean$mean, alternative="two.sided",paired=TRUE,conf.level= 0.95)
+t.est.nutrition
+```
+
+Question g. Run a t-test for control v/s WSH+N group. Hint: Use the above code and make necessary changes. Interpret the results and report p-values and 95%CI. 
+```{r}
+treatment_2 <- "Nutrition + WSH"
+
+nut.wsh.grp <- data.frame("----- your code here ----- ")
+
+wsh.nut.block.mean <- " ------ your code here ------- "
+
+t.est.wsh.nut <- " ------- your code here --------- "
+
+t.est.wsh.nut
+```
+
+Preparing the data below for running regression 
+```{r}
+
+
+# make a dataframe with treatment and control groups
+ttdat <- anthro_out %>% 
+  filter(tr %in% c("Control", "Nutrition")) %>%
+  select(laz,tr,block) 
+
+```
+
+Part 5. CONDUCTING AN INTENT-TO-TREAT ANALYSIS TO ESTIMATE THE IMPACT OF THE NUTRITION PROGRAM ON  LAZ
+Perform the regression analysis
+```{r regression}
+fit <- glm(laz ~ as.factor(tr), data=ttdat, family=gaussian)
+summary(fit)
+```
+
+Question h. Do an ITT analysis to estimate the impact of WSH+Nutrition on LAZ. Hint: Use the code above and make necessary changes.
+
+```{r regression 2}
+ttdat.wsh.nut <- " ------ your code here ------ "
+
+# perform the linear regression
+
+```
+
+Question i. What do you notice about the results of t-test and regression above in the code you ran. Are they similar? Why or why not?
+
+# Your answer
+
+Question j. Interpret the results of the regression including the p-values and 95%CI. What do you mean by 95%CI? Explain in 1-2 lines. 
+
+# Your answer 
